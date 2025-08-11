@@ -14,8 +14,6 @@ CORS(app)
 requirements_db = {}   # { "REQ-1": {id, title, description, type, links: []} }
 next_req_num = 1       # auto-increment ID counter
 
-API_VER = "7.1-preview.3"  # Add this if missing
-
 # === Serve frontend ===
 @app.route("/")
 def index():
@@ -122,9 +120,10 @@ def traceability():
 
 # === Azure DevOps & OSLC Configuration ===
 
-AZDO_ORG = os.getenv("AZDO_ORG", "Your Organization")
-AZDO_PROJECT = os.getenv("AZDO_PROJECT", "Your Project")
-AZDO_PAT = os.getenv("AZDO_PAT", "Your PAT")
+AZDO_ORG = os.getenv("AZDO_ORG", "robjwoods")
+AZDO_PROJECT = os.getenv("AZDO_PROJECT", "OSLC Test")
+AZDO_PAT = os.getenv("AZDO_PAT", "")
+API_VER      = os.getenv("AZDO_API_VER", "7.0").strip()
 
 if not all([AZDO_ORG, AZDO_PROJECT, AZDO_PAT]):
     raise RuntimeError("Set AZDO_ORG, AZDO_PROJECT, AZDO_PAT env vars")
