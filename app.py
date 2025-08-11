@@ -14,10 +14,35 @@ CORS(app)
 requirements_db = {}   # { "REQ-1": {id, title, description, type, links: []} }
 next_req_num = 1       # auto-increment ID counter
 
+API_VER = "7.1-preview.3"  # Add this if missing
+
 # === Serve frontend ===
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
+
+@app.route("/api/ado/workitems")
+def list_ado_workitems():
+    try:
+        url = (f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/wiql?api-version={API_VER}")
+        wiql = {
+            "query": "SELECT [System.Id], [System.Title] FROM WorkItems WHERE [System.TeamProject] = @project ORDER BY [System.Id] DESC"
+        }
+        r = requests.post(url, headers=ADO_JSON_HDRS, json=wiql, timeout=30)
+        r.raise_for_status()
+        ids = [wi["id"] for wi in r.json().get("workItems", [])]
+        items = []
+        for wid in ids:
+            try:
+                wi = ado_get(wid)
+                items.append({"id": wi["id"], "title": wi["fields"].get("System.Title", "")})
+            except Exception as e:
+                print(f"Failed to fetch work item {wid}: {e}")
+                continue
+        return jsonify(items)
+    except Exception as e:
+        print("Error in /api/ado/workitems:", e)
+        return jsonify({"error": str(e)}), 500
 
 # === Basic CRUD & linking for requirements ===
 @app.route("/api/requirements", methods=["GET"])

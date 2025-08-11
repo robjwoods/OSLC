@@ -10,6 +10,7 @@ async function fetchJSON(url) {
 // Renderer: Display list of requirements
 function renderList(items) {
   const ul = document.getElementById("item-list");
+  if (!ul) return; // Prevent error if element not found
   ul.innerHTML = items.map(i => `<li>${i.name}</li>`).join("");
 }
 
@@ -27,9 +28,11 @@ async function renderListWrapper() {
 async function renderExportOptions() {
   try {
     const select = document.getElementById("export-select");
-    const items = await fetchJSON(API);
+    if (!select) return;
+    // Fetch from Azure DevOps endpoint
+    const items = await fetchJSON("/api/ado/workitems");
     select.innerHTML = items.map(r =>
-      `<option value="${r.id.replace("REQ-", "")}">${r.id}</option>`
+      `<option value="${r.id}">${r.id} - ${r.title}</option>`
     ).join("");
   } catch (err) {
     console.error("Failed to render export options:", err);
@@ -40,6 +43,7 @@ async function renderExportOptions() {
 async function renderTrace() {
   try {
     const traceEl = document.getElementById("trace-view");
+    if (!traceEl) return; // Prevent error if element not found
     const data = await fetchJSON("/api/trace");
     traceEl.innerHTML = data.map(t =>
       `<li>${t.source} ➡️ ${t.target}</li>`
