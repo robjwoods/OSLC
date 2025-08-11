@@ -1,0 +1,45 @@
+body {
+  font-family: Arial, sans-serif;
+  margin: 2rem;
+  color: #333;
+}
+
+h1, h2 {
+  color: #005a9c;
+}
+
+section {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+}
+
+input, textarea, select, button {
+  display: block;
+  width: 100%;
+  margin: 0.5rem 0;
+  padding: 0.5rem;
+}
+
+button {
+  background: #005a9c;
+  color: white;
+  border: none;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #004080;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 0.5rem;
+  text-align: left;
+}

@@ -1,0 +1,268 @@
+import os
+import base64
+import requests
+from flask import Flask, jsonify, request, send_from_directory, Response
+from flask_cors import CORS
+from rdflib import Graph, Namespace, Literal, RDF, URIRef
+from rdflib.namespace import DCTERMS
+
+# === Flask app setup ===
+app = Flask(__name__, static_folder="static", static_url_path="")
+CORS(app)
+
+# === In-memory requirements store ===
+requirements_db = {}   # { "REQ-1": {id, title, description, type, links: []} }
+next_req_num = 1       # auto-increment ID counter
+
+# === Serve frontend ===
+@app.route("/")
+def index():
+    return send_from_directory("static", "index.html")
+
+# === Basic CRUD & linking for requirements ===
+@app.route("/api/requirements", methods=["GET"])
+def list_requirements():
+    return jsonify(list(requirements_db.values()))
+
+@app.route("/api/requirements", methods=["POST"])
+def create_requirement():
+    global next_req_num
+    data = request.json or {}
+    req_id = f"REQ-{next_req_num}"
+    next_req_num += 1
+
+    requirement = {
+        "id": req_id,
+        "title": data.get("title", "").strip(),
+        "description": data.get("description", "").strip(),
+        "type": data.get("type", "Functional").strip(),
+        "links": []
+    }
+    requirements_db[req_id] = requirement
+    return jsonify(requirement), 201
+
+@app.route("/api/requirements/<req_id>", methods=["PUT"])
+def update_requirement(req_id):
+    req = requirements_db.get(req_id)
+    if not req:
+        return jsonify({"error": "Not found"}), 404
+
+    data = request.json or {}
+    for field in ("title", "description", "type"):
+        if field in data:
+            req[field] = data[field].strip()
+    return jsonify(req)
+
+@app.route("/api/requirements/<req_id>", methods=["DELETE"])
+def delete_requirement(req_id):
+    if req_id not in requirements_db:
+        return jsonify({"error": "Not found"}), 404
+
+    del requirements_db[req_id]
+    # remove any incoming links
+    for r in requirements_db.values():
+        r["links"] = [l for l in r["links"] if l["target"] != req_id]
+    return jsonify({"message": "Deleted"})
+
+@app.route("/api/requirements/<req_id>/links", methods=["POST"])
+def add_link(req_id):
+    source = requirements_db.get(req_id)
+    if not source:
+        return jsonify({"error": "Source not found"}), 404
+
+    data = request.json or {}
+    target = data.get("target", "").strip()
+    link_type = data.get("type", "satisfies").strip()
+
+    if target not in requirements_db:
+        return jsonify({"error": "Target not found"}), 404
+
+    if any(l["target"] == target and l["type"] == link_type for l in source["links"]):
+        return jsonify({"error": "Link exists"}), 400
+
+    source["links"].append({"type": link_type, "target": target})
+    return jsonify(source), 201
+
+@app.route("/api/traceability", methods=["GET"])
+def traceability():
+    matrix = []
+    for req in requirements_db.values():
+        for link in req["links"]:
+            matrix.append({
+                "source": req["id"],
+                "type": link["type"],
+                "target": link["target"]
+            })
+    return jsonify(matrix)
+
+# === Azure DevOps & OSLC Configuration ===
+
+AZDO_ORG = os.getenv("AZDO_ORG", "Your Organization")
+AZDO_PROJECT = os.getenv("AZDO_PROJECT", "Your Project")
+AZDO_PAT = os.getenv("AZDO_PAT", "Your PAT")
+
+if not all([AZDO_ORG, AZDO_PROJECT, AZDO_PAT]):
+    raise RuntimeError("Set AZDO_ORG, AZDO_PROJECT, AZDO_PAT env vars")
+
+_auth = base64.b64encode(f":{AZDO_PAT}".encode()).decode()
+ADO_JSON_HDRS  = {
+    "Authorization": f"Basic {_auth}",
+    "Content-Type": "application/json",
+    "Accept": "application/json"
+}
+ADO_PATCH_HDRS = {
+    "Authorization": f"Basic {_auth}",
+    "Content-Type": "application/json-patch+json",
+    "Accept": "application/json"
+}
+
+OSLC = Namespace("http://open-services.net/ns/core#")
+RM   = Namespace("http://open-services.net/ns/rm#")
+
+def ado_url(item_id: int) -> str:
+    return (f"https://dev.azure.com/{AZDO_ORG}/"
+            f"{AZDO_PROJECT}/_apis/wit/workItems/{item_id}")
+
+def ado_get(item_id: int) -> dict:
+    url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/workitems/{item_id}?api-version={API_VER}"
+    r = requests.get(url, headers=ADO_JSON_HDRS, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def ado_create(wi_type: str, title: str, desc: str) -> dict:
+    url = (f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/"
+           f"_apis/wit/workitems/${wi_type}?api-version={API_VER}")
+    patch = [
+        {"op": "add", "path": "/fields/System.Title",       "value": title},
+        {"op": "add", "path": "/fields/System.Description", "value": desc}
+    ]
+    r = requests.post(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def ado_update(item_id: int, title: str, desc: str) -> dict:
+    url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/workitems/{item_id}?api-version={API_VER}"
+    patch = []
+    if title is not None:
+        patch.append({"op": "add", "path": "/fields/System.Title",       "value": title})
+    if desc  is not None:
+        patch.append({"op": "add", "path": "/fields/System.Description", "value": desc})
+    if not patch:
+        return ado_get(item_id)
+    r = requests.patch(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def ado_add_link(source: int, rel: str, target: int):
+    url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/workitems/{source}?api-version={API_VER}"
+    rel_val = {"rel": rel, "url": ado_url(target)}
+    patch   = [{"op": "add", "path": "/relations/-", "value": rel_val}]
+    r = requests.patch(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
+    r.raise_for_status()
+    return r.json()
+
+def to_oslc(work_items: list[dict], base="http://example/oslc/req/") -> Graph:
+    g = Graph()
+    g.bind("dcterms", DCTERMS)
+    g.bind("oslc", OSLC)
+    g.bind("rm",   RM)
+
+    id2uri = {}
+    # create resources
+    for wi in work_items:
+        uri = URIRef(f"{base}{wi['id']}")
+        id2uri[wi["id"]] = uri
+        g.add((uri, RDF.type, RM.Requirement))
+        title = wi.get("fields", {}).get("System.Title", "")
+        desc  = wi.get("fields", {}).get("System.Description", "")
+        g.add((uri, DCTERMS.title,       Literal(title)))
+        if desc:
+            g.add((uri, DCTERMS.description, Literal(desc)))
+
+    # add oslc:relatedTo for Related links
+    for wi in work_items:
+        src = id2uri[wi["id"]]
+        for rel in wi.get("relations", []) or []:
+            if rel.get("rel") == "System.LinkTypes.Related":
+                try:
+                    tgt_id = int(rel["url"].rstrip("/").split("/")[-1])
+                    tgt = id2uri.get(str(tgt_id), URIRef(f"{base}{tgt_id}"))
+                    g.add((src, OSLC.relatedTo, tgt))
+                except:
+                    pass
+    return g
+
+def parse_oslc(rdf_data: bytes) -> Graph:
+    g = Graph()
+    g.parse(data=rdf_data, format="application/rdf+xml")
+    return g
+
+def import_oslc(g: Graph, default_type="User Story", base="http://example/oslc/req/"):
+    subj2id = {}
+    # 1st pass: create/update
+    for subj in g.subjects(RDF.type, RM.Requirement):
+        title = str(next(g.objects(subj, DCTERMS.title),       ""))
+        desc  = str(next(g.objects(subj, DCTERMS.description), ""))
+        sid   = None
+        try:
+            sid = int(str(subj).rstrip("/").split("/")[-1])
+        except:
+            pass
+
+        if sid:
+            wi = ado_update(sid, title, desc)
+        else:
+            wi = ado_create(default_type, title, desc)
+        subj2id[str(subj)] = wi["id"]
+
+    # 2nd pass: add Related links
+    for subj in subj2id:
+        src_id = subj2id[subj]
+        for tgt in g.objects(URIRef(subj), OSLC.relatedTo):
+            tid = subj2id.get(str(tgt))
+            if not tid:
+                try:
+                    tid = int(str(tgt).rstrip("/").split("/")[-1])
+                except:
+                    continue
+            ado_add_link(src_id, "System.LinkTypes.Related", tid)
+
+    return subj2id
+
+# === OSLC endpoints ===
+@app.route("/api/oslc/export")
+def oslc_export():
+    ids_q = request.args.get("ids", "")
+    if not ids_q:
+        return jsonify({"error": "Provide ?ids=1,2,3"}), 400
+    try:
+        ids = [int(i) for i in ids_q.split(",") if i.strip()]
+    except:
+        return jsonify({"error": "Invalid IDs"}), 400
+
+    wis = [ado_get(i) for i in ids]
+    graph = to_oslc(wis)
+    rdf   = graph.serialize(format="application/rdf+xml")
+    return Response(rdf, mimetype="application/rdf+xml")
+
+@app.route("/api/oslc/import", methods=["POST"])
+def oslc_import():
+    if not request.data:
+        return jsonify({"error": "Missing RDF/XML body"}), 400
+    wi_type = request.args.get("type", "User Story")
+    try:
+        graph   = parse_oslc(request.data)
+        mapping = import_oslc(graph, default_type=wi_type)
+        return jsonify({"message": "Imported", "mapping": mapping}), 201
+    except requests.HTTPError as e:
+        return jsonify({
+            "error":   "Azure DevOps API error",
+            "details": str(e),
+            "body":    getattr(e.response, "text", "")
+        }), 502
+    except Exception as e:
+        return jsonify({"error": "Import failed", "details": str(e)}), 400
+
+# === Run app ===
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:dcterms="http://purl.org/dc/terms/"
+         xmlns:oslc="http://open-services.net/ns/core#"
+         xmlns:rm="http://open-services.net/ns/rm#">
+  <rm:Requirement rdf:about="http://example/oslc/req/A1">
+    <dcterms:title>Autonomous Navigation Test</dcterms:title>
+    <dcterms:description>The system shall navigate without human input.</dcterms:description>
+    <oslc:relatedTo rdf:resource="http://example/oslc/req/A2"/>
+  </rm:Requirement>
+  <rm:Requirement rdf:about="http://example/oslc/req/A2">
+    <dcterms:title>Manual Override Test</dcterms:title>
+    <dcterms:description>The system shall support manual override.</dcterms:description>
+  </rm:Requirement>
+</rdf:RDF>
