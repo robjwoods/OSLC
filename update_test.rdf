@@ -5,9 +5,9 @@
     xmlns:rm="http://open-services.net/ns/rm#"
     xmlns:dcterms="http://purl.org/dc/terms/">
 
-  
-    <dcterms:title>Updated Autonomous Navigation Test</dcterms:title>
-    <dcterms:description>Updated The system shall navigate without human input.</dcterms:description>
+  <rm:Requirement rdf:about="https://dev.azure.com/ORG/PROJECT/_apis/wit/workItems/32">
+    <dcterms:title>Test work item Updated</dcterms:title>
+    <dcterms:description>&lt;div&gt;This is a test work item created in AzDO &lt;/div&gt;</dcterms:description>
   </rm:Requirement>
 
 </rdf:RDF>
