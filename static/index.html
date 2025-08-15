@@ -1,35 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Simple Requirements Modeler + OSLC Sync</title>
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <title>OSLC Requirements</title>
 </head>
 <body>
-  <h1>⚙️ Requirements Modeler</h1>
+  <h1>Requirements</h1>
+  <ul id="item-list"></ul>
 
-  <!-- existing sections... -->
+  <h2>Export Requirements</h2>
+  <select id="export-select" multiple></select>
+  <button id="export-btn">Export OSLC</button>
 
-  <!-- OSLC Sync -->
-  <section id="oslc-section">
-    <h2>OSLC Sync</h2>
+  <h2>Import Requirements</h2>
+  <input type="file" id="import-file" accept=".rdf,application/rdf+xml">
+  <button id="import-btn">Import OSLC</button>
+  <pre id="import-result"></pre>
 
-    <!-- Export -->
-    <div id="export-block">
-      <h3>Export to OSLC RDF/XML</h3>
-      <label>Select IDs (multi):</label>
-      <select id="export-select" multiple size="4"></select>
-      <button id="export-btn">Download OSLC</button>
-    </div>
-
-    <!-- Import -->
-    <div id="import-block">
-      <h3>Import from OSLC RDF/XML</h3>
-      <input type="file" id="import-file" accept=".rdf,.xml" />
-      <button id="import-btn">Upload & Push to ADO</button>
-      <pre id="import-result"></pre>
-    </div>
-  </section>
+  <h2>Traceability Matrix</h2>
+  <ul id="trace-view"></ul>
 
   <script src="main.js"></script>
 </body>

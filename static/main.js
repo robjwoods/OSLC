@@ -7,11 +7,17 @@ async function fetchJSON(url) {
   return res.json();
 }
 
-// Renderer: Display list of requirements
+// Renderer: Display list of requirements with state
 function renderList(items) {
   const ul = document.getElementById("item-list");
-  if (!ul) return; // Prevent error if element not found
-  ul.innerHTML = items.map(i => `<li>${i.name}</li>`).join("");
+  if (!ul) return;
+  ul.innerHTML = items.map(i =>
+    `<li>
+      <strong>${i.id}</strong>: ${i.title}
+      <br><em>${i.description}</em>
+      <br><span>Type: ${i.type} | State: <b>${i.state}</b></span>
+    </li>`
+  ).join("");
 }
 
 // Wrapper: Fetch and render list
@@ -39,14 +45,16 @@ async function renderExportOptions() {
   }
 }
 
-// Optional: Render traceability links
+// Render traceability matrix with state
 async function renderTrace() {
   try {
     const traceEl = document.getElementById("trace-view");
-    if (!traceEl) return; // Prevent error if element not found
-    const data = await fetchJSON("/api/trace");
+    if (!traceEl) return;
+    const data = await fetchJSON("/api/traceability");
     traceEl.innerHTML = data.map(t =>
-      `<li>${t.source} ➡️ ${t.target}</li>`
+      `<li>
+        <strong>${t.source}</strong> [${t.state}] ➡️ <strong>${t.target}</strong> (${t.type})
+      </li>`
     ).join("");
   } catch (err) {
     console.error("Trace fetch failed:", err);
@@ -103,7 +111,7 @@ document.getElementById("import-btn").onclick = async () => {
       resultEl.textContent = "Import successful:\n" + JSON.stringify(json, null, 2);
       await renderListWrapper();
       await renderExportOptions();
-      // await renderTrace();
+      await renderTrace();
     }
   } catch (err) {
     resultEl.textContent = "Import error:\n" + err.message;
@@ -114,5 +122,5 @@ document.getElementById("import-btn").onclick = async () => {
 window.onload = () => {
   renderListWrapper();
   renderExportOptions();
-  // renderTrace();
+  renderTrace();
 };
