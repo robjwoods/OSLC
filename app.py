@@ -7,10 +7,6 @@ from rdflib import Graph, Namespace, Literal, RDF, URIRef
 from rdflib.namespace import DCTERMS
 import logging
 
-# === Flask app setup ===
-app = Flask(__name__, static_folder="static", static_url_path="")
-CORS(app)
-
 # === Logging setup ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("oslc_app")
@@ -194,50 +190,6 @@ def ado_update(item_id: int, title: str = None, desc: str = None, state: str = N
     r.raise_for_status()
     logger.info(f"Updated Azure DevOps work item {item_id}")
     return r.json()
-
-def ado_add_link(source: int, rel: str, target: int):
-    url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/workitems/{source}?api-version={API_VER}"
-    rel_val = {"rel": rel, "url": ado_url(target)}
-    patch   = [{"op": "add", "path": "/relations/-", "value": rel_val}]
-    r = requests.patch(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-def to_oslc(work_items: list[dict], base="http://example/oslc/req/") -> Graph:
-    g = Graph()
-    g.bind("dcterms", DCTERMS)
-    g.bind("oslc", OSLC)
-    g.bind("rm",   RM)
-
-    id2uri = {}
-    # create resources
-    for wi in work_items:
-        uri = URIRef(f"{base}{wi['id']}")
-        id2uri[wi["id"]] = uri
-        g.add((uri, RDF.type, RM.Requirement))
-        title = wi.get("fields", {}).get("System.Title", "")
-        desc  = wi.get("fields", {}).get("System.Description", "")
-        g.add((uri, DCTERMS.title,       Literal(title)))
-        if desc:
-            g.add((uri, DCTERMS.description, Literal(desc)))
-
-    # add oslc:relatedTo for Related links
-    for wi in work_items:
-        src = id2uri[wi["id"]]
-        for rel in wi.get("relations", []) or []:
-            if rel.get("rel") == "System.LinkTypes.Related":
-                try:
-                    tgt_id = int(rel["url"].rstrip("/").split("/")[-1])
-                    tgt = id2uri.get(str(tgt_id), URIRef(f"{base}{tgt_id}"))
-                    g.add((src, OSLC.relatedTo, tgt))
-                except:
-                    pass
-    return g
-
-def parse_oslc(rdf_data: bytes) -> Graph:
-    g = Graph()
-    g.parse(data=rdf_data, format="application/rdf+xml")
-    return g
 
 def import_oslc(g: Graph, default_type="User Story", base="http://example/oslc/req/"):
     subj2id = {}
