@@ -5,13 +5,18 @@ from flask import Flask, jsonify, request, send_from_directory, Response
 from flask_cors import CORS
 from rdflib import Graph, Namespace, Literal, RDF, URIRef
 from rdflib.namespace import DCTERMS
+import logging
 
 # === Flask app setup ===
 app = Flask(__name__, static_folder="static", static_url_path="")
 CORS(app)
 
+# === Logging setup ===
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("oslc_app")
+
 # === In-memory requirements store ===
-requirements_db = {}   # { "REQ-1": {id, title, description, type, links: []} }
+requirements_db = {}   # { "REQ-1": {id, title, description, type, state, links: []} }
 next_req_num = 1       # auto-increment ID counter
 
 # === Serve frontend ===
@@ -54,14 +59,20 @@ def create_requirement():
     req_id = f"REQ-{next_req_num}"
     next_req_num += 1
 
+    # Validate required fields
+    if not data.get("title"):
+        return jsonify({"error": "Title is required"}), 400
+
     requirement = {
         "id": req_id,
         "title": data.get("title", "").strip(),
         "description": data.get("description", "").strip(),
         "type": data.get("type", "Functional").strip(),
+        "state": data.get("state", "New").strip(),
         "links": []
     }
     requirements_db[req_id] = requirement
+    logger.info(f"Created requirement {req_id}: {requirement['title']}")
     return jsonify(requirement), 201
 
 @app.route("/api/requirements/<req_id>", methods=["PUT"])
@@ -71,9 +82,10 @@ def update_requirement(req_id):
         return jsonify({"error": "Not found"}), 404
 
     data = request.json or {}
-    for field in ("title", "description", "type"):
+    for field in ("title", "description", "type", "state"):
         if field in data:
             req[field] = data[field].strip()
+    logger.info(f"Updated requirement {req_id}")
     return jsonify(req)
 
 @app.route("/api/requirements/<req_id>", methods=["DELETE"])
@@ -114,7 +126,8 @@ def traceability():
             matrix.append({
                 "source": req["id"],
                 "type": link["type"],
-                "target": link["target"]
+                "target": link["target"],
+                "state": req.get("state", "New")  # Include state for traceability
             })
     return jsonify(matrix)
 
@@ -153,28 +166,33 @@ def ado_get(item_id: int) -> dict:
     r.raise_for_status()
     return r.json()
 
-def ado_create(wi_type: str, title: str, desc: str) -> dict:
+def ado_create(wi_type: str, title: str, desc: str, state: str = "New") -> dict:
     url = (f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/"
            f"_apis/wit/workitems/${wi_type}?api-version={API_VER}")
     patch = [
         {"op": "add", "path": "/fields/System.Title",       "value": title},
-        {"op": "add", "path": "/fields/System.Description", "value": desc}
+        {"op": "add", "path": "/fields/System.Description", "value": desc},
+        {"op": "add", "path": "/fields/System.State",       "value": state}
     ]
     r = requests.post(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
     r.raise_for_status()
+    logger.info(f"Created Azure DevOps work item: {title}")
     return r.json()
 
-def ado_update(item_id: int, title: str, desc: str) -> dict:
+def ado_update(item_id: int, title: str = None, desc: str = None, state: str = None) -> dict:
     url = f"https://dev.azure.com/{AZDO_ORG}/{AZDO_PROJECT}/_apis/wit/workitems/{item_id}?api-version={API_VER}"
     patch = []
     if title is not None:
         patch.append({"op": "add", "path": "/fields/System.Title",       "value": title})
     if desc  is not None:
         patch.append({"op": "add", "path": "/fields/System.Description", "value": desc})
+    if state is not None:
+        patch.append({"op": "add", "path": "/fields/System.State",       "value": state})
     if not patch:
         return ado_get(item_id)
     r = requests.patch(url, headers=ADO_PATCH_HDRS, json=patch, timeout=30)
     r.raise_for_status()
+    logger.info(f"Updated Azure DevOps work item {item_id}")
     return r.json()
 
 def ado_add_link(source: int, rel: str, target: int):
@@ -227,16 +245,38 @@ def import_oslc(g: Graph, default_type="User Story", base="http://example/oslc/r
     for subj in g.subjects(RDF.type, RM.Requirement):
         title = str(next(g.objects(subj, DCTERMS.title),       ""))
         desc  = str(next(g.objects(subj, DCTERMS.description), ""))
+        state = str(next(g.objects(subj, OSLC.state), "New"))
         sid   = None
         try:
             sid = int(str(subj).rstrip("/").split("/")[-1])
         except:
             pass
 
-        if sid:
-            wi = ado_update(sid, title, desc)
+        # Validate if work item already exists in requirements_db
+        req_id = str(subj).replace(base, "")
+        if req_id in requirements_db:
+            # Update in-memory requirement
+            req = requirements_db[req_id]
+            req["title"] = title or req.get("title", "")
+            req["description"] = desc or req.get("description", "")
+            req["state"] = state or req.get("state", "New")
+            logger.info(f"Updated in-memory requirement {req_id} from OSLC import")
         else:
-            wi = ado_create(default_type, title, desc)
+            requirements_db[req_id] = {
+                "id": req_id,
+                "title": title,
+                "description": desc,
+                "type": default_type,
+                "state": state,
+                "links": []
+            }
+            logger.info(f"Imported new requirement {req_id} from OSLC")
+
+        # Sync with Azure DevOps
+        if sid:
+            wi = ado_update(sid, title, desc, state)
+        else:
+            wi = ado_create(default_type, title, desc, state)
         subj2id[str(subj)] = wi["id"]
 
     # 2nd pass: add Related links
