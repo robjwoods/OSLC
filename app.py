@@ -7,6 +7,9 @@ from rdflib import Graph, Namespace, Literal, RDF, URIRef
 from rdflib.namespace import DCTERMS
 import logging
 
+app = Flask(__name__)  # <-- Add this line
+CORS(app)    
+
 # === Logging setup ===
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("oslc_app")
